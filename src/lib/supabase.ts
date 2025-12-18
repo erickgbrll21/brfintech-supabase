@@ -13,10 +13,9 @@ if (!supabaseUrl || !supabaseKey) {
 // NUNCA usa localStorage para evitar sessões antigas persistentes
 class TemporaryStorage implements Storage {
   private memoryStorage: Map<string, string> = new Map();
-  private storageKey: string;
 
-  constructor(storageKey: string) {
-    this.storageKey = storageKey;
+  constructor() {
+    // Storage temporário que não persiste entre sessões
   }
 
   getItem(key: string): string | null {
@@ -107,7 +106,7 @@ class TemporaryStorage implements Storage {
   }
 }
 
-const temporaryStorage = new TemporaryStorage('sb-auth-token');
+const temporaryStorage = new TemporaryStorage();
 
 // LIMPEZA INICIAL: Remover qualquer sessão antiga do localStorage ao iniciar
 // Isso garante que sessões "fantasma" de deploys anteriores sejam removidas
