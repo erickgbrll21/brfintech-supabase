@@ -1,6 +1,47 @@
 import { Transfer } from '../types';
 import { supabase } from '../lib/supabase';
 
+// Função auxiliar para normalizar data sem problemas de timezone
+// Esta função garante que a data seja interpretada como data local, não UTC
+// IMPORTANTE: Quando o PostgreSQL retorna TIMESTAMPTZ, ele retorna em UTC
+// Precisamos converter para o timezone local antes de extrair a data
+const normalizeDate = (dateString: string | null): string => {
+  if (!dateString || dateString.trim() === '') {
+    return '';
+  }
+  
+  // Se já está no formato YYYY-MM-DD, retornar direto
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    return dateString;
+  }
+  
+  // Se é uma data ISO completa (vinda do PostgreSQL como TIMESTAMPTZ em UTC)
+  // Precisamos criar um Date object e usar métodos locais para extrair a data
+  // Isso garante que a data seja interpretada no timezone local do usuário
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) {
+      return '';
+    }
+    
+    // IMPORTANTE: Usar métodos locais (getFullYear, getMonth, getDate)
+    // Esses métodos retornam valores no timezone local do navegador
+    // Isso corrige o problema de aparecer um dia antes
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+  } catch (e) {
+    // Fallback: tentar extrair com regex se não conseguir criar Date
+    const dateMatch = dateString.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (dateMatch) {
+      return dateMatch[1];
+    }
+    return '';
+  }
+};
+
 // Converter dados do banco para formato Transfer
 const dbToTransfer = (dbTransfer: any): Transfer => {
   return {
@@ -10,7 +51,7 @@ const dbToTransfer = (dbTransfer: any): Transfer => {
     taxas: parseFloat(dbTransfer.taxas) || 0,
     valorLiquido: parseFloat(dbTransfer.valor_liquido) || 0,
     status: dbTransfer.status || 'pendente',
-    dataEnvio: dbTransfer.data_envio || null,
+    dataEnvio: normalizeDate(dbTransfer.data_envio),
     customerId: dbTransfer.customer_id || null,
     customerName: dbTransfer.customer_name || null,
     createdAt: dbTransfer.created_at || new Date().toISOString(),
@@ -19,13 +60,28 @@ const dbToTransfer = (dbTransfer: any): Transfer => {
 
 // Converter Transfer para formato do banco
 const transferToDb = (transfer: Omit<Transfer, 'id' | 'createdAt'>) => {
+  // SOLUÇÃO: Salvar como meio-dia UTC para garantir que o dia seja preservado
+  // mesmo com diferenças de timezone ao ler de volta
+  let dataEnvio = null;
+  if (transfer.dataEnvio && transfer.dataEnvio.trim() !== '') {
+    // Extrair apenas a data YYYY-MM-DD
+    const dateMatch = transfer.dataEnvio.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (dateMatch) {
+      const dateStr = dateMatch[1];
+      // Salvar como meio-dia UTC (12:00:00 UTC)
+      // Isso garante que mesmo com timezones negativos (como Brasil UTC-3),
+      // quando lermos de volta, o dia ainda será o correto
+      dataEnvio = `${dateStr}T12:00:00.000Z`;
+    }
+  }
+  
   return {
     periodo: transfer.periodo || null,
     valor_bruto: transfer.valorBruto,
     taxas: transfer.taxas,
     valor_liquido: transfer.valorLiquido,
     status: transfer.status || 'pendente',
-    data_envio: transfer.dataEnvio || null,
+    data_envio: dataEnvio,
     customer_id: transfer.customerId || null,
     customer_name: transfer.customerName || null,
   };

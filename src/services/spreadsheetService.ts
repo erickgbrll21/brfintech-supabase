@@ -1074,10 +1074,33 @@ export const saveSpreadsheet = async (spreadsheet: Omit<SpreadsheetData, 'sales'
     
     // Criar automaticamente um registro no Histórico de Repasses
     try {
+      console.log('📊 Iniciando criação automática de repasse para planilha:', {
+        planilhaId: spreadsheetToSave.id,
+        customerId: spreadsheetToSave.customerId,
+        type: spreadsheetToSave.type,
+        referenceDate: spreadsheetToSave.referenceDate,
+        referenceMonth: spreadsheetToSave.referenceMonth
+      });
+      
       await createTransferFromSpreadsheet(spreadsheetToSave);
+      
+      // Disparar evento para atualizar a lista de repasses na interface
+      // Isso garante que o repasse apareça imediatamente após a criação
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('transferCreated', {
+          detail: {
+            customerId: spreadsheetToSave.customerId,
+            terminalId: spreadsheetToSave.terminalId,
+            type: spreadsheetToSave.type || 'monthly',
+            referenceDate: spreadsheetToSave.referenceDate,
+            referenceMonth: spreadsheetToSave.referenceMonth
+          }
+        }));
+        console.log('✅ Evento transferCreated disparado para atualizar interface');
+      }
     } catch (transferError) {
       // Não bloquear o salvamento da planilha se houver erro ao criar repasse
-      console.error('Erro ao criar repasse automaticamente:', transferError);
+      console.error('❌ Erro ao criar repasse automaticamente:', transferError);
     }
   } catch (error) {
     console.error('Erro ao salvar planilha:', error);
@@ -1088,6 +1111,95 @@ export const saveSpreadsheet = async (spreadsheet: Omit<SpreadsheetData, 'sales'
 // Criar repasse automaticamente a partir de uma planilha
 const createTransferFromSpreadsheet = async (spreadsheet: SpreadsheetData): Promise<void> => {
   try {
+    // Verificar se já existe um repasse para esta planilha (evitar duplicação)
+    // Determinar período para buscar repasse existente
+    let periodoParaBusca: string | undefined;
+    if (spreadsheet.type === 'daily' && spreadsheet.referenceDate) {
+      const dateStr = spreadsheet.referenceDate.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        const [year, month, day] = dateStr.split('-');
+        periodoParaBusca = `${day}/${month}/${year}`;
+      } else {
+        const date = new Date(spreadsheet.referenceDate);
+        periodoParaBusca = date.toLocaleDateString('pt-BR');
+      }
+    } else if (spreadsheet.referenceMonth) {
+      const [year, month] = spreadsheet.referenceMonth.split('-');
+      const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
+                          'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+      periodoParaBusca = `${monthNames[parseInt(month) - 1]}/${year}`;
+    }
+    
+    console.log('🔍 Verificando se já existe repasse para período:', periodoParaBusca);
+    
+    // Buscar repasses existentes do mesmo cliente
+    const { getTransfers } = await import('./transferService');
+    const allTransfers = await getTransfers();
+    const existingTransfers = allTransfers.filter(t => t.customerId === spreadsheet.customerId);
+    const existingTransfer = existingTransfers.find(t => 
+      t.customerId === spreadsheet.customerId &&
+      t.periodo === periodoParaBusca
+    );
+    
+    if (existingTransfer) {
+      console.log('⚠️ Repasse já existe para este período:', existingTransfer.id);
+    } else {
+      console.log('✅ Nenhum repasse encontrado para este período, criando novo...');
+    }
+    
+    // Se já existe um repasse para este período, atualizar ao invés de criar novo
+    if (existingTransfer) {
+      console.log('Repasse já existe para este período, atualizando valores...');
+      // Atualizar o repasse existente com os novos valores
+      const { updateTransfer } = await import('./transferService');
+      
+      // Buscar valores customizados dos cards editados pelo administrador
+      const customValues = await getCustomerCardValues(
+        spreadsheet.customerId,
+        spreadsheet.terminalId,
+        spreadsheet.referenceMonth,
+        spreadsheet.referenceDate,
+        spreadsheet.type || 'monthly'
+      );
+      
+      // Calcular métricas da planilha (usar como fallback)
+      const metrics = await calculateSpreadsheetMetrics(spreadsheet);
+      
+      // Usar valores customizados se existirem, senão usar valores calculados da planilha
+      let valorBruto = customValues?.valorBruto ?? metrics.valorBrutoTotal;
+      
+      // Taxa: usar valor absoluto dos cards se existir (já está em R$), senão calcular
+      let taxas: number;
+      if (customValues?.taxa !== undefined && customValues.taxa > 0) {
+        taxas = customValues.taxa;
+      } else if (customValues?.valorBruto !== undefined && customValues.valorBruto > 0) {
+        taxas = customValues.valorBruto * 0.051;
+      } else if (metrics.taxaMedia > 0) {
+        taxas = metrics.valorBrutoTotal * (metrics.taxaMedia / 100);
+      } else {
+        taxas = metrics.valorBrutoTotal * 0.051;
+      }
+      
+      // Valor líquido: usar customizado se existir, senão calcular
+      let valorLiquido = customValues?.valorLiquido;
+      if (!valorLiquido || valorLiquido <= 0) {
+        valorLiquido = valorBruto - taxas;
+      }
+      
+      // Atualizar repasse existente apenas se houver valores válidos
+      if (valorBruto > 0) {
+        await updateTransfer(existingTransfer.id, {
+          valorBruto,
+          taxas,
+          valorLiquido,
+          // Manter período, status e data de envio existentes
+        });
+        console.log('Repasse atualizado automaticamente para planilha:', spreadsheet.id);
+      }
+      return; // Não criar novo repasse
+    }
+    
+    // Se não existe repasse, criar um novo
     // Buscar valores customizados dos cards editados pelo administrador
     const customValues = await getCustomerCardValues(
       spreadsheet.customerId,
@@ -1138,31 +1250,65 @@ const createTransferFromSpreadsheet = async (spreadsheet: SpreadsheetData): Prom
     
     // Determinar período/referência
     let periodo: string | undefined;
+    let dataEnvio: string = '';
+    
     if (spreadsheet.type === 'daily' && spreadsheet.referenceDate) {
       // Para planilhas diárias, usar a data formatada
-      const date = new Date(spreadsheet.referenceDate);
-      periodo = date.toLocaleDateString('pt-BR');
+      // referenceDate já está no formato YYYY-MM-DD, usar diretamente
+      const dateStr = spreadsheet.referenceDate.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        // Se já está no formato correto, usar diretamente
+        dataEnvio = dateStr;
+        // Formatar para exibição no período
+        const [year, month, day] = dateStr.split('-');
+        periodo = `${day}/${month}/${year}`;
+      } else {
+        // Se não está no formato correto, tentar criar Date e formatar
+        const date = new Date(spreadsheet.referenceDate);
+        periodo = date.toLocaleDateString('pt-BR');
+        // Usar métodos locais para evitar problemas de timezone
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        dataEnvio = `${year}-${month}-${day}`;
+      }
     } else if (spreadsheet.referenceMonth) {
       // Para planilhas mensais, usar o mês formatado
       const [year, month] = spreadsheet.referenceMonth.split('-');
       const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
                           'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
       periodo = `${monthNames[parseInt(month) - 1]}/${year}`;
+      // Para planilhas mensais, usar a data de upload (uploadedAt) como data de envio
+      if (spreadsheet.uploadedAt) {
+        const uploadDate = new Date(spreadsheet.uploadedAt);
+        // Usar métodos locais para evitar problemas de timezone
+        const uploadYear = uploadDate.getFullYear();
+        const uploadMonth = String(uploadDate.getMonth() + 1).padStart(2, '0');
+        const uploadDay = String(uploadDate.getDate()).padStart(2, '0');
+        dataEnvio = `${uploadYear}-${uploadMonth}-${uploadDay}`;
+      }
     }
     
-    // Criar o repasse com status Pendente e data de envio vazia
-    await createTransfer({
+    // Criar o repasse com status Pendente e data de envio preenchida com a data da planilha
+    const newTransfer = await createTransfer({
       periodo,
       valorBruto,
       taxas,
       valorLiquido,
       status: 'pendente',
-      dataEnvio: '', // Data vazia quando status é pendente
+      dataEnvio: dataEnvio, // Data da planilha (referenceDate para diárias, uploadedAt para mensais)
       customerId: spreadsheet.customerId,
       customerName,
     });
     
-    console.log('Repasse criado automaticamente para planilha:', spreadsheet.id, customValues ? '(usando valores customizados)' : '(usando valores da planilha)');
+    console.log('✅ Repasse criado automaticamente para planilha:', {
+      planilhaId: spreadsheet.id,
+      repasseId: newTransfer.id,
+      periodo,
+      valorBruto,
+      dataEnvio,
+      usandoValoresCustomizados: !!customValues
+    });
   } catch (error) {
     console.error('Erro ao criar repasse a partir da planilha:', error);
     throw error;

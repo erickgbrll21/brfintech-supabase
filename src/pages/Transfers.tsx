@@ -22,6 +22,46 @@ const formatDate = (dateString: string): string => {
   return new Date(dateString).toLocaleDateString('pt-BR');
 };
 
+// Função para extrair data no formato YYYY-MM-DD sem problemas de timezone
+// SOLUÇÃO DEFINITIVA: Converter UTC para timezone local antes de extrair a data
+const extractDateOnly = (dateString: string): string => {
+  if (!dateString || dateString.trim() === '') {
+    return '';
+  }
+  
+  // Se já está no formato YYYY-MM-DD, retornar direto
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    return dateString;
+  }
+  
+  // Se é uma data ISO completa (vinda do PostgreSQL como TIMESTAMPTZ em UTC)
+  // Precisamos converter para o timezone local antes de extrair a data
+  try {
+    // Criar Date object a partir da string ISO (que está em UTC)
+    const utcDate = new Date(dateString);
+    
+    if (isNaN(utcDate.getTime())) {
+      return '';
+    }
+    
+    // IMPORTANTE: Usar métodos locais (getFullYear, getMonth, getDate)
+    // Esses métodos automaticamente convertem de UTC para o timezone local
+    // Isso garante que a data exibida seja a data correta no timezone do usuário
+    const year = utcDate.getFullYear();
+    const month = String(utcDate.getMonth() + 1).padStart(2, '0');
+    const day = String(utcDate.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+  } catch (e) {
+    // Fallback: tentar extrair com regex se não conseguir criar Date
+    const dateMatch = dateString.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (dateMatch) {
+      return dateMatch[1];
+    }
+    return '';
+  }
+};
+
 // Função para obter cor e ícone do status
 const getStatusDisplay = (status: TransferStatus) => {
   switch (status) {
@@ -97,6 +137,7 @@ const Transfers = () => {
     status: 'pendente' as TransferStatus,
     dataEnvio: new Date().toISOString().split('T')[0],
     customerId: '',
+    periodo: '',
   });
 
   useEffect(() => {
@@ -110,10 +151,17 @@ const Transfers = () => {
       loadTransfers();
     };
     
+    // Ouvir evento de criação de repasse para atualizar a lista imediatamente
+    const handleTransferCreated = () => {
+      loadTransfers();
+    };
+    
     window.addEventListener('cardValuesUpdated', handleCardValuesUpdated);
+    window.addEventListener('transferCreated', handleTransferCreated);
     
     return () => {
       window.removeEventListener('cardValuesUpdated', handleCardValuesUpdated);
+      window.removeEventListener('transferCreated', handleTransferCreated);
     };
   }, [isAdmin]);
 
@@ -276,10 +324,26 @@ const Transfers = () => {
       // Se status for "enviado" e não tiver data, usar data atual
       let dataEnvio = formData.dataEnvio;
       if (formData.status === 'enviado' && (!dataEnvio || dataEnvio.trim() === '')) {
-        dataEnvio = new Date().toISOString();
+        // Criar data atual no formato YYYY-MM-DD
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        dataEnvio = `${year}-${month}-${day}`;
+      } else if (dataEnvio && dataEnvio.trim() !== '') {
+        // Garantir que a data está no formato YYYY-MM-DD
+        // O input type="date" sempre retorna neste formato
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dataEnvio)) {
+          // Se não está no formato correto, tentar extrair
+          const dateMatch = dataEnvio.match(/^(\d{4}-\d{2}-\d{2})/);
+          if (dateMatch) {
+            dataEnvio = dateMatch[1];
+          }
+        }
       }
 
       const transferData: Omit<Transfer, 'id' | 'createdAt'> = {
+        periodo: formData.periodo || undefined,
         valorBruto,
         taxas,
         valorLiquido,
@@ -298,6 +362,7 @@ const Transfers = () => {
       setShowModal(false);
       setEditingTransfer(null);
       setFormData({
+        periodo: '',
         valorBruto: '',
         taxas: '',
         valorLiquido: '',
@@ -315,12 +380,13 @@ const Transfers = () => {
   const handleEdit = (transfer: Transfer) => {
     setEditingTransfer(transfer);
     setFormData({
+      periodo: transfer.periodo || '',
       valorBruto: transfer.valorBruto.toFixed(2).replace('.', ','),
       taxas: transfer.taxas.toFixed(2).replace('.', ','),
       valorLiquido: transfer.valorLiquido.toFixed(2).replace('.', ','),
       status: transfer.status,
       dataEnvio: transfer.dataEnvio && transfer.dataEnvio.trim() !== '' 
-        ? transfer.dataEnvio.split('T')[0] 
+        ? extractDateOnly(transfer.dataEnvio)
         : '',
       customerId: transfer.customerId,
     });
@@ -342,6 +408,7 @@ const Transfers = () => {
   const openNewTransferModal = () => {
     setEditingTransfer(null);
     setFormData({
+      periodo: '',
       valorBruto: '',
       taxas: '',
       valorLiquido: '',
@@ -390,6 +457,7 @@ const Transfers = () => {
   }, [formData.valorBruto, formData.taxas]);
 
 
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -430,7 +498,7 @@ const Transfers = () => {
                 <th className="text-left py-4 px-6 font-semibold">Valor Líquido</th>
                 <th className="text-left py-4 px-6 font-semibold">Status</th>
                 <th className="text-left py-4 px-6 font-semibold">Data do Envio</th>
-                {isAdmin() && <th className="text-left py-4 px-6 font-semibold">Ações</th>}
+                <th className="text-left py-4 px-6 font-semibold">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -522,6 +590,22 @@ const Transfers = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-black mb-2">
+                  Período
+                </label>
+                <input
+                  type="text"
+                  value={formData.periodo}
+                  onChange={(e) => setFormData({ ...formData, periodo: e.target.value })}
+                  placeholder="Ex: Janeiro/2024 ou 15/01/2024"
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Exemplos: "Janeiro/2024" (mensal) ou "15/01/2024" (diária)
+                </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

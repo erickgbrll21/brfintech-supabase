@@ -365,6 +365,25 @@ export const createCustomer = async (
   password?: string
 ): Promise<Customer> => {
   try {
+    // Verificar se a sessão ainda é válida antes de criar o cliente
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError || !sessionData?.session) {
+      console.error('Erro ao verificar sessão:', sessionError);
+      throw new Error('Sua sessão expirou. Por favor, faça login novamente.');
+    }
+    
+    // Verificar se a sessão expirou
+    const session = sessionData.session;
+    if (session.expires_at) {
+      const expiresAt = session.expires_at * 1000; // Converter para milliseconds
+      const now = Date.now();
+      
+      if (expiresAt < now) {
+        throw new Error('Sua sessão expirou. Por favor, faça login novamente.');
+      }
+    }
+    
     // Gerar ID único
     const newId = `c${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
@@ -399,6 +418,12 @@ export const createCustomer = async (
 
     if (customerError) {
       console.error('Erro ao criar cliente no Supabase:', customerError);
+      
+      // Verificar se o erro é relacionado a autenticação
+      if (customerError.code === 'PGRST301' || customerError.message?.includes('JWT') || customerError.message?.includes('session')) {
+        throw new Error('Sua sessão expirou. Por favor, faça login novamente.');
+      }
+      
       throw customerError;
     }
 

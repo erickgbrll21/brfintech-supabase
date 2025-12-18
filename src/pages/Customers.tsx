@@ -195,8 +195,30 @@ const Customers = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Verificar se o usuário ainda está autenticado antes de salvar
+    if (!user) {
+      alert('Sua sessão expirou. Por favor, faça login novamente.');
+      navigate('/login');
+      return;
+    }
+    
+    // Adicionar estado de loading para evitar múltiplos submits
+    if (isLoading) {
+      return; // Já está processando, não fazer nada
+    }
+    
+    setIsLoading(true);
+    
     try {
       const { password, cieloTerminals, ...customerData } = formData;
+      
+      // Validar dados obrigatórios
+      if (!customerData.name || customerData.name.trim() === '') {
+        alert('Por favor, preencha o nome do cliente.');
+        setIsLoading(false);
+        return;
+      }
       
       // Converter array de terminais para formato CieloTerminal[]
       const terminals: CieloTerminal[] = cieloTerminals.map((term, index) => ({
@@ -222,6 +244,7 @@ const Customers = () => {
         // Ao criar, senha é obrigatória se username for fornecido
         if (formData.username && !password) {
           alert('Por favor, defina uma senha quando criar um usuário para o cliente.');
+          setIsLoading(false);
           return;
         }
         const newCustomer = await createCustomer(customerDataWithTerminals, password || undefined);
@@ -245,6 +268,7 @@ const Customers = () => {
           });
           // Não fechar o modal, apenas mostrar mensagem de sucesso
           alert('Cliente criado com sucesso! Agora você pode adicionar planilhas para cada conta.');
+          setIsLoading(false);
           return; // Não limpar o formulário ainda
         }
       }
@@ -255,9 +279,27 @@ const Customers = () => {
       setFormData(initialFormData);
       setNewTerminal({ terminalId: '', name: '' });
       setSelectedTerminalForSpreadsheet(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao salvar cliente:', error);
-      alert('Erro ao salvar cliente. Tente novamente.');
+      
+      // Verificar se o erro é relacionado a autenticação/sessão
+      if (error?.message?.includes('JWT') || error?.message?.includes('session') || error?.message?.includes('expired') || error?.code === 'PGRST301') {
+        alert('Sua sessão expirou. Por favor, faça login novamente.');
+        navigate('/login');
+        return;
+      }
+      
+      // Verificar se é erro de rede/timeout
+      if (error?.message?.includes('timeout') || error?.message?.includes('network') || error?.code === 'ECONNABORTED') {
+        alert('Erro de conexão. Verifique sua internet e tente novamente.');
+        setIsLoading(false);
+        return;
+      }
+      
+      // Erro genérico
+      alert(`Erro ao salvar cliente: ${error?.message || 'Erro desconhecido'}. Tente novamente.`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -815,17 +857,39 @@ const Customers = () => {
               <div className="flex space-x-3 pt-4">
                 <button
                   type="submit"
-                  className="flex-1 bg-black text-white py-3 rounded-lg font-semibold hover:bg-gray-800 transition-colors"
+                  disabled={isLoading}
+                  className={`flex-1 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center ${
+                    isLoading 
+                      ? 'bg-gray-400 text-white cursor-not-allowed' 
+                      : 'bg-black text-white hover:bg-gray-800'
+                  }`}
                 >
-                  {editingCustomer ? 'Salvar' : 'Criar'}
+                  {isLoading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white mr-2"></div>
+                      Salvando...
+                    </>
+                  ) : (
+                    editingCustomer ? 'Salvar Alterações' : 'Criar Cliente'
+                  )}
                 </button>
                 <button
                   type="button"
                   onClick={() => {
-                    setShowModal(false);
-                    setEditingCustomer(null);
+                    if (!isLoading) {
+                      setShowModal(false);
+                      setEditingCustomer(null);
+                      setFormData(initialFormData);
+                      setNewTerminal({ terminalId: '', name: '' });
+                      setSelectedTerminalForSpreadsheet(null);
+                    }
                   }}
-                  className="flex-1 bg-gray-200 text-black py-3 rounded-lg font-semibold hover:bg-gray-300 transition-colors"
+                  disabled={isLoading}
+                  className={`flex-1 py-3 rounded-lg font-semibold transition-colors ${
+                    isLoading 
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed' 
+                      : 'bg-gray-200 text-black hover:bg-gray-300'
+                  }`}
                 >
                   Cancelar
                 </button>
