@@ -1168,7 +1168,7 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                     )}
                   </p>
                   {spreadsheetData.description && spreadsheetData.description.trim() !== '' && (
-                    <p className="text-sm text-gray-700 mt-2 italic border-l-4 border-blue-500 pl-3">
+                    <p className="text-sm text-gray-700 mt-2 italic border-l-4 border-blue-500 pl-3 font-bold">
                       {spreadsheetData.description}
                     </p>
                   )}

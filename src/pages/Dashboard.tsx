@@ -889,7 +889,7 @@ const Dashboard = () => {
                         {spreadsheetData.data.length} linhas • {spreadsheetData.headers.length} colunas
                 </p>
                       {spreadsheetData.description && (
-                        <p className="text-sm text-gray-700 mt-2 italic border-l-4 border-blue-500 pl-3">
+                        <p className="text-sm text-gray-700 mt-2 italic border-l-4 border-blue-500 pl-3 font-bold">
                           {spreadsheetData.description}
                         </p>
                       )}
@@ -1026,7 +1026,7 @@ const Dashboard = () => {
                         {spreadsheetDataDaily.data.length} linhas • {spreadsheetDataDaily.headers.length} colunas
                       </p>
                       {spreadsheetDataDaily.description && spreadsheetDataDaily.description.trim() !== '' && (
-                        <p className="text-sm text-gray-700 mt-2 italic border-l-4 border-green-500 pl-3">
+                        <p className="text-sm text-gray-700 mt-2 italic border-l-4 border-green-500 pl-3 font-bold">
                           {spreadsheetDataDaily.description}
                         </p>
                       )}
