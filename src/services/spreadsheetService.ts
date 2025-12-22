@@ -38,6 +38,7 @@ export interface SpreadsheetData {
   headers: string[]; // Cabeçalhos das colunas
   sales: SpreadsheetSale[]; // Dados estruturados de vendas
   originalFile?: string; // Arquivo original em base64 para preservar formatação exata
+  description?: string; // Descrição da planilha (editável apenas por administradores)
 }
 
 // Mapear nomes de colunas permitidas para campos padronizados
@@ -559,6 +560,7 @@ const dbToSpreadsheet = (dbRow: any): SpreadsheetData => {
     headers: dbRow.headers || [],
     sales: dbRow.sales || [],
     originalFile: dbRow.original_file || undefined, // Arquivo original em base64
+    description: dbRow.description || undefined, // Descrição da planilha
   };
 };
 
@@ -577,6 +579,7 @@ const spreadsheetToDb = (spreadsheet: SpreadsheetData): any => {
     headers: spreadsheet.headers,
     sales: spreadsheet.sales || [],
     original_file: spreadsheet.originalFile || null, // Arquivo original em base64
+    description: spreadsheet.description || null, // Descrição da planilha
   };
 };
 

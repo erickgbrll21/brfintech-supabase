@@ -769,6 +769,11 @@ const TerminalDashboard = () => {
                       <p className="text-xs text-gray-500 mt-1">
                         {spreadsheetData.data.length} linhas • {spreadsheetData.headers.length} colunas
                   </p>
+                      {spreadsheetData.description && (
+                        <p className="text-sm text-gray-700 mt-2 italic border-l-4 border-blue-500 pl-3">
+                          {spreadsheetData.description}
+                        </p>
+                      )}
                 </div>
               </div>
                   <div className="flex items-center gap-2 flex-wrap">
@@ -859,6 +864,11 @@ const TerminalDashboard = () => {
                       <p className="text-xs text-gray-500 mt-1">
                         {spreadsheetDataDaily.data.length} linhas • {spreadsheetDataDaily.headers.length} colunas
                       </p>
+                      {spreadsheetDataDaily.description && spreadsheetDataDaily.description.trim() !== '' && (
+                        <p className="text-sm text-gray-700 mt-2 italic border-l-4 border-green-500 pl-3">
+                          {spreadsheetDataDaily.description}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">

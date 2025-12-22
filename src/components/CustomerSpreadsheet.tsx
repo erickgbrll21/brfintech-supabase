@@ -35,6 +35,19 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
     valorLiquido: '',
   });
   const [spreadsheetMetrics, setSpreadsheetMetrics] = useState<any>(null);
+  const [description, setDescription] = useState<string>(''); // Descrição da planilha (apenas para administradores)
+  const [showEditDescription, setShowEditDescription] = useState(false); // Modal para editar descrição
+  const [editingDescription, setEditingDescription] = useState<string>(''); // Descrição sendo editada
+  
+  // Função auxiliar para atualizar planilha e descrição juntas
+  const updateSpreadsheetData = (data: SpreadsheetData | null) => {
+    setSpreadsheetData(data);
+    if (data?.description) {
+      setDescription(data.description);
+    } else {
+      setDescription('');
+    }
+  };
   
   // Refs para rastrear se a seleção foi feita manualmente pelo usuário
   // Isso evita que useEffects alterem a seleção após o usuário ter escolhido manualmente
@@ -284,9 +297,9 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
         const data = terminalId 
           ? await getSpreadsheetByTerminalId(terminalId, customerId, selectedMonth, 'monthly')
           : await getSpreadsheetByCustomerId(customerId, selectedMonth, 'monthly');
-        setSpreadsheetData(data);
+        updateSpreadsheetData(data);
       } else if (spreadsheetType === 'monthly') {
-        setSpreadsheetData(null);
+        updateSpreadsheetData(null);
       }
     };
     loadSpreadsheet();
@@ -309,7 +322,7 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
         const loadOnce = async () => {
           const data = await getSpreadsheetByDate(customerId, selectedDay, terminalId);
           if (data && data.referenceDate === selectedDay && selectedDay === lastSelectedDayRef.current) {
-            setSpreadsheetData(data);
+            updateSpreadsheetData(data);
           }
         };
         loadOnce();
@@ -362,14 +375,14 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
           // Se não encontrou planilha mas ainda há uma data selecionada, limpar
           // Mas só se não houver bloqueio
           if (!lockSelectionRef.current || !userSelectedDayRef.current) {
-            setSpreadsheetData(null);
+            updateSpreadsheetData(null);
           }
         }
       } else if (spreadsheetType === 'daily' && !currentSelectedDay) {
         // Se não há dia selecionado, limpar planilha apenas se realmente não há seleção
         // E não houver bloqueio
         if (isMounted && !selectedDay && (!lockSelectionRef.current || !userSelectedDayRef.current)) {
-          setSpreadsheetData(null);
+          updateSpreadsheetData(null);
         }
       }
     };
@@ -637,6 +650,7 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
               headers,
               sales,
               originalFile: originalFileBase64, // Salvar arquivo original em base64 para preservar formatação
+              description: description || undefined, // Descrição da planilha
             };
 
             // Mostrar prévia antes de salvar
@@ -674,7 +688,7 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
     
     if (window.confirm('Tem certeza que deseja excluir esta planilha?')) {
       await deleteSpreadsheet(customerId, terminalId);
-      setSpreadsheetData(null);
+      updateSpreadsheetData(null);
     }
   };
 
@@ -693,9 +707,13 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
         referenceMonth: referenceMonth || getCurrentMonth(),
         referenceDate: finalReferenceDate,
         type: spreadsheetType,
+        description: description || previewData.description || undefined, // Incluir descrição ao salvar
       };
       
       await saveSpreadsheet(spreadsheetToSave);
+      
+      // Limpar descrição após salvar
+      setDescription('');
       
       // Recarregar meses e dias disponíveis baseado no tipo
       if (spreadsheetToSave.type === 'daily') {
@@ -1037,6 +1055,25 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                          : 'Selecione o dia específico desta planilha diária'}
                      </p>
                    </div>
+                   
+                   {/* Campo de Descrição - Apenas para administradores */}
+                   {isAdmin() && (
+                     <div>
+                       <label className="block text-sm font-medium text-blue-900 mb-2">
+                         Descrição da Planilha
+                       </label>
+                       <textarea
+                         value={description}
+                         onChange={(e) => setDescription(e.target.value)}
+                         placeholder="Adicione uma descrição para esta planilha (opcional)"
+                         rows={3}
+                         className="w-full px-4 py-2 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors resize-none"
+                       />
+                       <p className="text-xs text-blue-700 mt-1">
+                         Esta descrição será visível para o cliente ao visualizar a planilha
+                       </p>
+                     </div>
+                   )}
                  </div>
               </div>
 
@@ -1116,19 +1153,26 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                 {spreadsheetType === 'monthly' ? '📊 Planilhas Mensais' : '📅 Planilhas Diárias'} - {terminalName ? `${terminalName} (${customerName})` : customerName}
               </h2>
               {spreadsheetData && (
-                <p className="text-sm text-gray-600">
-                  {spreadsheetData.fileName} • {new Date(spreadsheetData.uploadedAt).toLocaleDateString('pt-BR')}
-                  {spreadsheetData.referenceDate && spreadsheetType === 'daily' && (
-                    <span className="ml-2 font-semibold text-green-700">
-                      📅 {formatDateLocal(spreadsheetData.referenceDate)}
-                    </span>
+                <div>
+                  <p className="text-sm text-gray-600">
+                    {spreadsheetData.fileName} • {new Date(spreadsheetData.uploadedAt).toLocaleDateString('pt-BR')}
+                    {spreadsheetData.referenceDate && spreadsheetType === 'daily' && (
+                      <span className="ml-2 font-semibold text-green-700">
+                        📅 {formatDateLocal(spreadsheetData.referenceDate)}
+                      </span>
+                    )}
+                    {spreadsheetData.referenceMonth && spreadsheetType === 'monthly' && (
+                      <span className="ml-2 font-semibold text-blue-700">
+                        📊 {formatMonth(spreadsheetData.referenceMonth)}
+                      </span>
+                    )}
+                  </p>
+                  {spreadsheetData.description && spreadsheetData.description.trim() !== '' && (
+                    <p className="text-sm text-gray-700 mt-2 italic border-l-4 border-blue-500 pl-3">
+                      {spreadsheetData.description}
+                    </p>
                   )}
-                  {spreadsheetData.referenceMonth && spreadsheetType === 'monthly' && (
-                    <span className="ml-2 font-semibold text-blue-700">
-                      📊 {formatMonth(spreadsheetData.referenceMonth)}
-                    </span>
-                  )}
-                </p>
+                </div>
               )}
             </div>
           </div>
@@ -1168,7 +1212,7 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                       : await getSpreadsheetByCustomerId(customerId, monthValue, 'monthly');
                     setSpreadsheetData(data);
                   } else {
-                    setSpreadsheetData(null);
+                    updateSpreadsheetData(null);
                   }
                 }}
                 className="px-4 py-2 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors bg-white font-semibold"
@@ -1232,7 +1276,7 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                     const data = await getSpreadsheetByDate(customerId, dayValue, terminalId);
                     setSpreadsheetData(data);
                   } else {
-                    setSpreadsheetData(null);
+                    updateSpreadsheetData(null);
                   }
                 }}
                 className="px-4 py-2 border-2 border-green-300 rounded-lg focus:outline-none focus:border-green-500 transition-colors bg-white font-semibold"
@@ -1324,7 +1368,7 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                         // Atualizar dia selecionado e carregar planilha imediatamente
                         setSelectedDay(day);
                         const data = await getSpreadsheetByDate(customerId, day, terminalId);
-                        setSpreadsheetData(data);
+                        updateSpreadsheetData(data);
                       }}
                       className={`p-4 rounded-lg border-2 transition-all text-center ${
                         isSelected
@@ -1463,6 +1507,20 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
                   <Download className="w-4 h-4" />
                   Baixar Planilha
                 </button>
+                {/* Botão de Editar Descrição - Apenas para administradores quando há planilha selecionada */}
+                {isAdmin() && spreadsheetData && (
+                  <button
+                    onClick={() => {
+                      setEditingDescription(spreadsheetData.description || '');
+                      setShowEditDescription(true);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-semibold"
+                    title="Editar descrição da planilha"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                    Editar Descrição
+                  </button>
+                )}
                 {/* Botão de Editar Valores dos Cards - Apenas quando há planilha selecionada */}
                 {spreadsheetData && spreadsheetMetrics && (
                   <button
@@ -1534,6 +1592,90 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
       </div>
 
       {/* Modal de Edição de Valores dos Cards */}
+      {/* Modal de Editar Descrição */}
+      {showEditDescription && spreadsheetData && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[70] p-4">
+          <div className="bg-white rounded-lg border-2 border-black w-full max-w-2xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 md:p-6 border-b-2 border-black">
+              <div className="flex items-center gap-3">
+                <Edit2 className="w-6 h-6 md:w-8 md:h-8 text-black" />
+                <div>
+                  <h2 className="text-lg md:text-xl font-bold text-black">Editar Descrição da Planilha</h2>
+                  <p className="text-sm text-gray-600">
+                    {spreadsheetData.fileName}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowEditDescription(false);
+                  setEditingDescription('');
+                }}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 md:w-6 md:h-6 text-black" />
+              </button>
+            </div>
+
+            {/* Conteúdo */}
+            <div className="flex-1 overflow-auto p-4 md:p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-black mb-2">
+                  Descrição da Planilha
+                </label>
+                <textarea
+                  value={editingDescription}
+                  onChange={(e) => setEditingDescription(e.target.value)}
+                  placeholder="Adicione uma descrição para esta planilha (opcional)"
+                  rows={5}
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors resize-none"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Esta descrição será visível para o cliente ao visualizar a planilha
+                </p>
+              </div>
+            </div>
+
+            {/* Botões de Ação */}
+            <div className="flex gap-3 p-4 md:p-6 border-t-2 border-black">
+              <button
+                onClick={async () => {
+                  try {
+                    // Atualizar apenas a descrição da planilha existente
+                    const updatedSpreadsheet: SpreadsheetData = {
+                      ...spreadsheetData,
+                      description: editingDescription.trim() || undefined,
+                    };
+                    
+                    await saveSpreadsheet(updatedSpreadsheet);
+                    updateSpreadsheetData(updatedSpreadsheet);
+                    setShowEditDescription(false);
+                    setEditingDescription('');
+                  } catch (error) {
+                    console.error('Erro ao salvar descrição:', error);
+                    alert('Erro ao salvar descrição. Tente novamente.');
+                  }
+                }}
+                className="flex-1 flex items-center justify-center gap-2 bg-black text-white py-3 rounded-lg font-semibold hover:bg-gray-800 transition-colors"
+              >
+                <Save className="w-5 h-5" />
+                Salvar Descrição
+              </button>
+              <button
+                onClick={() => {
+                  setShowEditDescription(false);
+                  setEditingDescription('');
+                }}
+                className="flex-1 bg-gray-200 text-black py-3 rounded-lg font-semibold hover:bg-gray-300 transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showEditCardValues && spreadsheetData && (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[70] p-4">
           <div className="bg-white rounded-lg border-2 border-black w-full max-w-2xl max-h-[90vh] flex flex-col">
