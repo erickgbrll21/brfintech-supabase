@@ -36,3 +36,5 @@ Você deve ver as seguintes colunas:
 - file_name (TEXT)
 - headers (JSONB)
 - sales (JSONB)
+
+

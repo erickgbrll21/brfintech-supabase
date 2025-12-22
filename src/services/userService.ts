@@ -19,6 +19,7 @@ export const getUsers = async (): Promise<User[]> => {
       id: user.id,
       name: user.name,
       email: user.email,
+      username: user.username || undefined,
       role: user.role,
       createdAt: user.created_at,
       customerId: user.customer_id,
@@ -83,12 +84,46 @@ export const getUserByEmail = async (email: string): Promise<User | null> => {
       id: data.id,
       name: data.name,
       email: data.email,
+      username: data.username || undefined,
       role: data.role,
       createdAt: data.created_at,
       customerId: data.customer_id,
     };
   } catch (error) {
     console.error('Erro inesperado ao buscar usuário por email:', error);
+    return null;
+  }
+};
+
+export const getUserByUsername = async (username: string): Promise<User | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('username', username)
+      .maybeSingle();
+    
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return null; // Nenhum resultado encontrado
+      }
+      console.error('Erro ao buscar usuário por username do Supabase:', error);
+      return null;
+    }
+    
+    if (!data) return null;
+    
+    return {
+      id: data.id,
+      name: data.name,
+      email: data.email,
+      username: data.username || undefined,
+      role: data.role,
+      createdAt: data.created_at,
+      customerId: data.customer_id,
+    };
+  } catch (error) {
+    console.error('Erro inesperado ao buscar usuário por username:', error);
     return null;
   }
 };
@@ -109,20 +144,51 @@ export const createUser = async (
     // Criar hash da senha
     const hashedPassword = await hashPassword(password);
     
+    // Preparar dados para inserção
+    const insertData: any = {
+      id: newId,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      customer_id: user.customerId || null,
+    };
+    
+    // Adicionar username apenas se fornecido e não vazio
+    if (user.username && user.username.trim() !== '') {
+      insertData.username = user.username.trim();
+    }
+    
     // Inserir usuário no Supabase
     const { data: userData, error: userError } = await supabase
       .from('users')
-      .insert({
-        id: newId,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        customer_id: user.customerId || null,
-      })
+      .insert(insertData)
       .select()
       .single();
     
-    if (userError) throw userError;
+    if (userError) {
+      console.error('Erro ao inserir usuário:', userError);
+      console.error('Dados que tentaram ser inseridos:', insertData);
+      
+      // Tratar diferentes tipos de erros
+      if (userError.code === '23505') {
+        // Violação de constraint único
+        if (userError.message?.includes('username') || userError.message?.includes('users_username_key')) {
+          throw new Error('Este nome de usuário já está em uso. Escolha outro.');
+        } else if (userError.message?.includes('email') || userError.message?.includes('users_email_key')) {
+          throw new Error('Este email já está em uso. Escolha outro.');
+        } else {
+          throw new Error('Já existe um registro com estes dados. Verifique email e username.');
+        }
+      } else if (userError.code === '42703' || userError.message?.includes('column "username" does not exist')) {
+        throw new Error('A coluna username não existe no banco de dados. Execute a migração SQL primeiro: migration_add_username_to_users.sql');
+      } else if (userError.code === '23502') {
+        throw new Error('Campos obrigatórios não foram preenchidos corretamente.');
+      } else {
+        // Erro genérico com mais detalhes
+        const errorMsg = userError.message || userError.code || 'Erro desconhecido';
+        throw new Error(`Erro ao criar usuário: ${errorMsg}`);
+      }
+    }
     
     // Inserir senha no Supabase
     const { error: passwordError } = await supabase
@@ -168,6 +234,7 @@ export const createUser = async (
             id: userData.id,
             name: userData.name,
             email: userData.email,
+            username: userData.username || undefined,
             role: userData.role,
             createdAt: userData.created_at,
             customerId: customerId,
@@ -185,13 +252,22 @@ export const createUser = async (
       id: userData.id,
       name: userData.name,
       email: userData.email,
+      username: userData.username || undefined,
       role: userData.role,
       createdAt: userData.created_at,
       customerId: userData.customer_id,
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Erro ao criar usuário no Supabase:', error);
-    throw new Error('Erro ao criar usuário. Tente novamente.');
+    
+    // Se já é um erro com mensagem personalizada, apenas relançar
+    if (error?.message && !error.message.includes('Erro ao criar usuário')) {
+      throw error;
+    }
+    
+    // Caso contrário, criar mensagem de erro mais detalhada
+    const errorMsg = error?.message || error?.code || 'Erro desconhecido';
+    throw new Error(`Erro ao criar usuário: ${errorMsg}`);
   }
 };
 
@@ -205,6 +281,10 @@ export const updateUser = async (
     const updateData: any = {};
     if (updates.name !== undefined) updateData.name = updates.name;
     if (updates.email !== undefined) updateData.email = updates.email;
+    if (updates.username !== undefined) {
+      // Se username for vazio, definir como null
+      updateData.username = updates.username && updates.username.trim() !== '' ? updates.username.trim() : null;
+    }
     if (updates.role !== undefined) updateData.role = updates.role;
     if (updates.customerId !== undefined) updateData.customer_id = updates.customerId;
     
@@ -216,7 +296,16 @@ export const updateUser = async (
       .select()
       .single();
     
-    if (userError) throw userError;
+    if (userError) {
+      console.error('Erro ao atualizar usuário:', userError);
+      // Se o erro for relacionado a username duplicado ou coluna não existe
+      if (userError.code === '23505' && userError.message?.includes('username')) {
+        throw new Error('Este nome de usuário já está em uso. Escolha outro.');
+      } else if (userError.message?.includes('column "username" does not exist')) {
+        throw new Error('A coluna username não existe no banco de dados. Execute a migração SQL primeiro.');
+      }
+      throw userError;
+    }
     if (!userData) return null;
     
     // Atualizar senha se fornecida
@@ -262,6 +351,7 @@ export const updateUser = async (
       id: userData.id,
       name: userData.name,
       email: userData.email,
+      username: userData.username || undefined,
       role: userData.role,
       createdAt: userData.created_at,
       customerId: userData.customer_id,

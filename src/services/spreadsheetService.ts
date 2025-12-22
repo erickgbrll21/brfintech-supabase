@@ -1084,20 +1084,9 @@ export const saveSpreadsheet = async (spreadsheet: Omit<SpreadsheetData, 'sales'
       
       await createTransferFromSpreadsheet(spreadsheetToSave);
       
-      // Disparar evento para atualizar a lista de repasses na interface
-      // Isso garante que o repasse apareça imediatamente após a criação
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('transferCreated', {
-          detail: {
-            customerId: spreadsheetToSave.customerId,
-            terminalId: spreadsheetToSave.terminalId,
-            type: spreadsheetToSave.type || 'monthly',
-            referenceDate: spreadsheetToSave.referenceDate,
-            referenceMonth: spreadsheetToSave.referenceMonth
-          }
-        }));
-        console.log('✅ Evento transferCreated disparado para atualizar interface');
-      }
+      // O evento transferCreated já é disparado dentro de createTransferFromSpreadsheet
+      // tanto para criação quanto para atualização, então não precisamos disparar aqui novamente
+      console.log('✅ Processo de criação/atualização de repasse concluído');
     } catch (transferError) {
       // Não bloquear o salvamento da planilha se houver erro ao criar repasse
       console.error('❌ Erro ao criar repasse automaticamente:', transferError);
@@ -1194,7 +1183,27 @@ const createTransferFromSpreadsheet = async (spreadsheet: SpreadsheetData): Prom
           valorLiquido,
           // Manter período, status e data de envio existentes
         });
-        console.log('Repasse atualizado automaticamente para planilha:', spreadsheet.id);
+        console.log('✅ Repasse atualizado automaticamente para planilha:', spreadsheet.id);
+        
+        // Disparar evento para atualizar a lista de repasses na interface
+        // Usar setTimeout para garantir que o evento seja disparado após a atualização do banco
+        setTimeout(() => {
+          if (typeof window !== 'undefined') {
+            const event = new CustomEvent('transferCreated', {
+              detail: {
+                customerId: spreadsheet.customerId,
+                terminalId: spreadsheet.terminalId,
+                type: spreadsheet.type || 'monthly',
+                referenceDate: spreadsheet.referenceDate,
+                referenceMonth: spreadsheet.referenceMonth,
+                action: 'updated',
+                transferId: existingTransfer.id
+              }
+            });
+            window.dispatchEvent(event);
+            console.log('✅ Evento transferCreated disparado (atualização) para atualizar interface', event.detail);
+          }
+        }, 100);
       }
       return; // Não criar novo repasse
     }
@@ -1309,6 +1318,26 @@ const createTransferFromSpreadsheet = async (spreadsheet: SpreadsheetData): Prom
       dataEnvio,
       usandoValoresCustomizados: !!customValues
     });
+    
+    // Disparar evento para atualizar a lista de repasses na interface
+    // Usar setTimeout para garantir que o evento seja disparado após a criação no banco
+    setTimeout(() => {
+      if (typeof window !== 'undefined') {
+        const event = new CustomEvent('transferCreated', {
+          detail: {
+            customerId: spreadsheet.customerId,
+            terminalId: spreadsheet.terminalId,
+            type: spreadsheet.type || 'monthly',
+            referenceDate: spreadsheet.referenceDate,
+            referenceMonth: spreadsheet.referenceMonth,
+            action: 'created',
+            transferId: newTransfer.id
+          }
+        });
+        window.dispatchEvent(event);
+        console.log('✅ Evento transferCreated disparado (criação) para atualizar interface', event.detail);
+      }
+    }, 100);
   } catch (error) {
     console.error('Erro ao criar repasse a partir da planilha:', error);
     throw error;

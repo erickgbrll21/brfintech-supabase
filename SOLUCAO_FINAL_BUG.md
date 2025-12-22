@@ -110,3 +110,5 @@ Para testar a correção:
 5. Verifique que os dados da planilha são atualizados, mas a seleção permanece
 
 O bug deve estar completamente resolvido agora! ✅
+
+

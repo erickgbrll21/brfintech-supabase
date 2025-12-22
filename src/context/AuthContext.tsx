@@ -102,6 +102,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 id: retryUser.id,
                 name: retryUser.name,
                 email: retryUser.email,
+                username: retryUser.username || undefined,
                 role: retryUser.role,
                 createdAt: retryUser.created_at || retryUser.createdAt || new Date().toISOString(),
                 customerId: retryUser.customer_id || retryUser.customerId,
@@ -129,6 +130,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         id: userData.id,
         name: userData.name,
         email: userData.email,
+        username: userData.username || undefined,
         role: userData.role,
         createdAt: userData.created_at || userData.createdAt || new Date().toISOString(),
         customerId: userData.customer_id || userData.customerId,
@@ -301,7 +303,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
 
-      // Se não for email ou não funcionou como email, tentar como cliente (username)
+      // Se não for email ou não funcionou como email, tentar como username (usuário ou cliente)
+      // Primeiro tentar como usuário (users)
+      const { getUserByUsername, verifyUserPassword } = await import('../services/userService');
+      const foundUser = await getUserByUsername(emailOrUsername);
+      
+      if (foundUser) {
+        // Verificar senha do usuário usando hash
+        const isValidPassword = await verifyUserPassword(foundUser.id, password);
+        
+        if (isValidPassword) {
+          // Usuário encontrado e senha válida - definir como usuário logado
+          setUser(foundUser);
+          setIsLoading(false);
+          return true;
+        }
+      }
+      
+      // Se não encontrou como usuário, tentar como cliente (customers)
       const customers = await getCustomers();
       const foundCustomer = customers.find(c => c.username === emailOrUsername);
       

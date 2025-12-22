@@ -26,3 +26,5 @@ CREATE INDEX IF NOT EXISTS idx_customer_spreadsheets_reference_date ON customer_
 CREATE INDEX IF NOT EXISTS idx_customer_spreadsheets_type ON customer_spreadsheets(type);
 CREATE INDEX IF NOT EXISTS idx_customer_spreadsheets_reference_month ON customer_spreadsheets(reference_month);
 CREATE INDEX IF NOT EXISTS idx_customer_spreadsheets_customer_terminal ON customer_spreadsheets(customer_id, terminal_id);
+
+

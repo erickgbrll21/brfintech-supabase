@@ -13,6 +13,7 @@ const Users = () => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
+    username: '',
     role: 'user' as UserRole,
     password: '',
   });
@@ -40,6 +41,11 @@ const Users = () => {
     try {
       const { password, ...userData } = formData;
       
+      // Limpar username se estiver vazio
+      if (userData.username && userData.username.trim() === '') {
+        userData.username = undefined as any;
+      }
+      
       if (editingUser) {
         // Ao editar, só atualiza senha se fornecida e não vazia
         await updateUser(editingUser.id, userData, password && password.trim() !== '' ? password : undefined);
@@ -53,11 +59,21 @@ const Users = () => {
       }
       setShowModal(false);
       setEditingUser(null);
-      setFormData({ name: '', email: '', role: 'user', password: '' });
+      setFormData({ name: '', email: '', username: '', role: 'user', password: '' });
       loadUsers();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao salvar usuário:', error);
-      alert('Erro ao salvar usuário. Tente novamente.');
+      console.error('Detalhes do erro:', {
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+        fullError: error
+      });
+      
+      // Mostrar mensagem de erro mais amigável
+      const errorMessage = error?.message || error?.code || 'Erro desconhecido';
+      alert(`Erro ao salvar usuário:\n\n${errorMessage}\n\nVerifique o console do navegador (F12) para mais detalhes.`);
     }
   };
 
@@ -66,6 +82,7 @@ const Users = () => {
     setFormData({
       name: user.name,
       email: user.email,
+      username: user.username || '',
       role: user.role,
       password: '', // Não preencher senha ao editar por segurança
     });
@@ -86,7 +103,7 @@ const Users = () => {
 
   const openNewUserModal = () => {
     setEditingUser(null);
-    setFormData({ name: '', email: '', role: 'user', password: '' });
+    setFormData({ name: '', email: '', username: '', role: 'user', password: '' });
     setShowModal(true);
   };
 
@@ -131,6 +148,7 @@ const Users = () => {
               <tr className="bg-black text-white">
                 <th className="text-left py-4 px-6 font-semibold">Nome</th>
                 <th className="text-left py-4 px-6 font-semibold">Email</th>
+                <th className="text-left py-4 px-6 font-semibold">Login</th>
                 <th className="text-left py-4 px-6 font-semibold">Perfil</th>
                 <th className="text-left py-4 px-6 font-semibold">Data de Criação</th>
                 <th className="text-left py-4 px-6 font-semibold">Ações</th>
@@ -148,6 +166,9 @@ const Users = () => {
                     {user.name}
                   </td>
                   <td className="py-4 px-6 text-gray-700">{user.email}</td>
+                  <td className="py-4 px-6 text-gray-700">
+                    {user.username || <span className="text-gray-400 italic">Não definido</span>}
+                  </td>
                   <td className="py-4 px-6">
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -218,6 +239,21 @@ const Users = () => {
                   required
                   className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-black mb-2">
+                  Login (Usuário)
+                </label>
+                <input
+                  type="text"
+                  value={formData.username}
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                  placeholder="Nome de usuário para login"
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-black transition-colors"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Opcional: Permite login usando este nome de usuário além do email
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-black mb-2">

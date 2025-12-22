@@ -152,8 +152,16 @@ const Transfers = () => {
     };
     
     // Ouvir evento de criação de repasse para atualizar a lista imediatamente
-    const handleTransferCreated = () => {
-      loadTransfers();
+    const handleTransferCreated = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      console.log('📢 Evento transferCreated recebido na página Transfers:', customEvent.detail);
+      console.log('📢 Ação:', customEvent.detail?.action || 'desconhecida');
+      
+      // Recarregar lista de repasses após um delay para garantir que o banco foi atualizado
+      setTimeout(() => {
+        console.log('🔄 Recarregando lista de repasses...');
+        loadTransfers();
+      }, 500);
     };
     
     window.addEventListener('cardValuesUpdated', handleCardValuesUpdated);

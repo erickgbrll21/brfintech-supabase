@@ -4,6 +4,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  username?: string; // Nome de usuário para login
   role: UserRole;
   createdAt: string;
   customerId?: string; // ID do cliente se for um cliente fazendo login

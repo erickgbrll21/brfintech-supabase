@@ -67,11 +67,23 @@ const transferToDb = (transfer: Omit<Transfer, 'id' | 'createdAt'>) => {
     // Extrair apenas a data YYYY-MM-DD
     const dateMatch = transfer.dataEnvio.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (dateMatch) {
-      const dateStr = dateMatch[1];
+      // Usar a data completa YYYY-MM-DD (dateMatch[0] contém toda a correspondência)
+      const dateStr = dateMatch[0];
       // Salvar como meio-dia UTC (12:00:00 UTC)
       // Isso garante que mesmo com timezones negativos (como Brasil UTC-3),
       // quando lermos de volta, o dia ainda será o correto
       dataEnvio = `${dateStr}T12:00:00.000Z`;
+    } else {
+      // Se não está no formato esperado, tentar validar e formatar
+      console.warn('Data de envio em formato inesperado:', transfer.dataEnvio);
+      // Tentar criar um objeto Date e formatar
+      const date = new Date(transfer.dataEnvio);
+      if (!isNaN(date.getTime())) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        dataEnvio = `${year}-${month}-${day}T12:00:00.000Z`;
+      }
     }
   }
   

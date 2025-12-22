@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL,
+  username TEXT UNIQUE,
   role TEXT NOT NULL CHECK (role IN ('admin', 'user', 'customer')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   customer_id TEXT
@@ -134,6 +135,7 @@ CREATE TABLE IF NOT EXISTS cielo_config (
 
 -- Índices para melhor performance
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_customers_username ON customers(username);
 CREATE INDEX IF NOT EXISTS idx_sales_customer_id ON sales(customer_id);
 CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date);
