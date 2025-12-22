@@ -1025,11 +1025,42 @@ const Dashboard = () => {
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
                       onClick={() => {
+                        if (!spreadsheetDataDaily) return;
+                        
+                        // Se temos o arquivo original, usar ele para preservar formatação exata
+                        if (spreadsheetDataDaily.originalFile) {
+                          try {
+                            const base64Data = spreadsheetDataDaily.originalFile;
+                            const byteCharacters = atob(base64Data);
+                            const byteNumbers = new Array(byteCharacters.length);
+                            for (let i = 0; i < byteCharacters.length; i++) {
+                              byteNumbers[i] = byteCharacters.charCodeAt(i);
+                            }
+                            const byteArray = new Uint8Array(byteNumbers);
+                            const blob = new Blob([byteArray], { 
+                              type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+                            });
+                            
+                            const url = window.URL.createObjectURL(blob);
+                            const link = document.createElement('a');
+                            link.href = url;
+                            link.download = spreadsheetDataDaily.fileName || `planilha_diaria_${spreadsheetDataDaily.referenceDate || 'atual'}.xlsx`;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            window.URL.revokeObjectURL(url);
+                            return;
+                          } catch (error) {
+                            console.error('Erro ao fazer download do arquivo original:', error);
+                          }
+                        }
+                        
+                        // Fallback: reconstruir planilha
                         const wb = XLSX.utils.book_new();
                         const wsData = [spreadsheetDataDaily.headers, ...spreadsheetDataDaily.data.map((row: any) => spreadsheetDataDaily.headers.map(header => row[header] || ''))];
                         const ws = XLSX.utils.aoa_to_sheet(wsData);
                         XLSX.utils.book_append_sheet(wb, ws, 'Planilha');
-                        XLSX.writeFile(wb, spreadsheetDataDaily.fileName || `planilha_diaria_${spreadsheetDataDaily.referenceMonth || 'atual'}.xlsx`);
+                        XLSX.writeFile(wb, spreadsheetDataDaily.fileName || `planilha_diaria_${spreadsheetDataDaily.referenceDate || 'atual'}.xlsx`);
                       }}
                       className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-semibold text-sm"
                     >

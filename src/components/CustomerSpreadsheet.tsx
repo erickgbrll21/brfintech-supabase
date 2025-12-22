@@ -491,12 +491,29 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
     setError(null);
 
     try {
+      // Ler arquivo como ArrayBuffer primeiro para converter para base64 e binary
       const reader = new FileReader();
       
       reader.onload = (e) => {
         (async () => {
           try {
-            const data = e.target?.result;
+            const arrayBuffer = e.target?.result as ArrayBuffer;
+            if (!arrayBuffer) {
+              setError('Erro ao ler o arquivo');
+              setIsUploading(false);
+              return;
+            }
+            
+            // Converter ArrayBuffer para base64 (para preservar arquivo original)
+            const bytes = new Uint8Array(arrayBuffer);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            const originalFileBase64 = btoa(binary);
+            
+            // Converter ArrayBuffer para binary string para processar com XLSX
+            const data = binary;
             const workbook = XLSX.read(data, { type: 'binary' });
             
             // Pegar a primeira planilha
@@ -619,6 +636,7 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
               data: rows,
               headers,
               sales,
+              originalFile: originalFileBase64, // Salvar arquivo original em base64 para preservar formatação
             };
 
             // Mostrar prévia antes de salvar
@@ -638,7 +656,8 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
         setIsUploading(false);
       };
 
-      reader.readAsBinaryString(file);
+      // Ler como ArrayBuffer para poder converter para base64 e binary
+      reader.readAsArrayBuffer(file);
     } catch (err) {
       console.error('Erro ao fazer upload:', err);
       setError('Erro ao fazer upload do arquivo');
@@ -769,7 +788,41 @@ const CustomerSpreadsheet = ({ customerId, customerName, terminalId, terminalNam
   const handleDownload = () => {
     if (!spreadsheetData) return;
 
-    // Criar workbook
+    // Se temos o arquivo original, usar ele para preservar formatação exata
+    if (spreadsheetData.originalFile) {
+      try {
+        // Converter base64 para blob e fazer download
+        const base64Data = spreadsheetData.originalFile;
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { 
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+        });
+        
+        // Criar link de download
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = spreadsheetData.fileName || `planilha_${customerName}.xlsx`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        console.log('✅ Download do arquivo original realizado (formatação preservada)');
+        return;
+      } catch (error) {
+        console.error('Erro ao fazer download do arquivo original:', error);
+        // Se falhar, tentar método alternativo abaixo
+      }
+    }
+
+    // Fallback: Se não temos arquivo original, reconstruir (comportamento antigo)
+    console.warn('⚠️ Arquivo original não disponível, reconstruindo planilha (pode perder formatação)');
     const wb = XLSX.utils.book_new();
     const wsData = [
       spreadsheetData.headers,

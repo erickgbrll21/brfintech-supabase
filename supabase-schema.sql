@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS customer_spreadsheets (
   uploaded_at TIMESTAMPTZ DEFAULT NOW(),
   data JSONB NOT NULL,
   headers JSONB, -- Cabeçalhos das colunas da planilha
-  sales JSONB -- Dados estruturados de vendas
+  sales JSONB, -- Dados estruturados de vendas
+  original_file TEXT -- Arquivo original em base64 para preservar formatação exata
 );
 
 -- Índices para melhorar performance das queries de planilhas

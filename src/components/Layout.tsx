@@ -26,7 +26,10 @@ const Layout = () => {
   const { isCustomer } = useAuth();
   
   const navItems = [
-    { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+    // Dashboard apenas para clientes
+    ...(isCustomer() ? [
+      { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+    ] : []),
     ...(isAdmin() ? [
       { path: '/users', label: 'Usuários', icon: Users },
       { path: '/customers', label: 'Clientes', icon: Building2 },

@@ -65,6 +65,26 @@ const AdminRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+// Componente para redirecionar baseado no tipo de usuário
+const HomeRedirect = () => {
+  const { isAdmin, isCustomer, isLoading } = useAuth();
+  
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+  
+  if (isAdmin()) {
+    return <Navigate to="/customers" replace />;
+  }
+  
+  if (isCustomer()) {
+    return <Dashboard />;
+  }
+  
+  // Para outros tipos de usuário, redirecionar para transfers
+  return <Navigate to="/transfers" replace />;
+};
+
 const AppRoutes = () => {
   return (
     <Suspense fallback={<LoadingSpinner />}>
@@ -78,7 +98,7 @@ const AppRoutes = () => {
             </PrivateRoute>
           }
         >
-          <Route index element={<Dashboard />} />
+          <Route index element={<HomeRedirect />} />
           <Route
             path="users"
             element={
