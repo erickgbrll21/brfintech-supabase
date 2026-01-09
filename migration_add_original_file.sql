@@ -8,3 +8,5 @@ ADD COLUMN IF NOT EXISTS original_file TEXT;
 
 -- Criar índice para melhorar performance (opcional)
 -- CREATE INDEX IF NOT EXISTS idx_customer_spreadsheets_original_file ON customer_spreadsheets(id) WHERE original_file IS NOT NULL;
+
+

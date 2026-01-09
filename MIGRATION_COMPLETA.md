@@ -50,3 +50,5 @@
 Agora que o banco de dados está corrigido e o código tem proteções contra alterações automáticas, o bug de mudança de data deve estar resolvido. A planilha não deve mais mudar automaticamente após você selecionar uma data manualmente.
 
 
+
+

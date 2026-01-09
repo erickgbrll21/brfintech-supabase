@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { Suspense, lazy } from 'react';
+import React, { Suspense, lazy } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import { Shield } from 'lucide-react';
@@ -23,9 +23,43 @@ const LoadingSpinner = () => (
 
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading } = useAuth();
+  const [hasTimedOut, setHasTimedOut] = React.useState(false);
 
-  if (isLoading) {
+  React.useEffect(() => {
+    // Timeout de segurança: se isLoading ficar true por mais de 20 segundos, mostrar erro
+    if (isLoading) {
+      const timeout = setTimeout(() => {
+        setHasTimedOut(true);
+      }, 20000);
+
+      return () => clearTimeout(timeout);
+    } else {
+      setHasTimedOut(false);
+    }
+  }, [isLoading]);
+
+  if (isLoading && !hasTimedOut) {
     return <LoadingSpinner />;
+  }
+
+  if (hasTimedOut) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white px-4">
+        <div className="text-center max-w-md">
+          <h2 className="text-2xl font-bold text-black mb-4">Problema ao carregar</h2>
+          <p className="text-gray-600 mb-6">
+            A aplicação está demorando mais que o esperado para carregar. 
+            Isso pode ser causado por problemas de conexão ou cold start do servidor.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-black text-white px-6 py-3 rounded-lg font-semibold hover:bg-gray-800 transition-colors"
+          >
+            Recarregar Página
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return user ? <>{children}</> : <Navigate to="/login" />;
@@ -33,9 +67,41 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
 
 const AdminRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, isLoading, isAdmin } = useAuth();
+  const [hasTimedOut, setHasTimedOut] = React.useState(false);
 
-  if (isLoading) {
+  React.useEffect(() => {
+    if (isLoading) {
+      const timeout = setTimeout(() => {
+        setHasTimedOut(true);
+      }, 20000);
+
+      return () => clearTimeout(timeout);
+    } else {
+      setHasTimedOut(false);
+    }
+  }, [isLoading]);
+
+  if (isLoading && !hasTimedOut) {
     return <LoadingSpinner />;
+  }
+
+  if (hasTimedOut) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white px-4">
+        <div className="text-center max-w-md">
+          <h2 className="text-2xl font-bold text-black mb-4">Problema ao carregar</h2>
+          <p className="text-gray-600 mb-6">
+            A aplicação está demorando mais que o esperado para carregar.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-black text-white px-6 py-3 rounded-lg font-semibold hover:bg-gray-800 transition-colors"
+          >
+            Recarregar Página
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (!user) {
@@ -68,9 +134,41 @@ const AdminRoute = ({ children }: { children: React.ReactNode }) => {
 // Componente para redirecionar baseado no tipo de usuário
 const HomeRedirect = () => {
   const { isAdmin, isCustomer, isLoading } = useAuth();
+  const [hasTimedOut, setHasTimedOut] = React.useState(false);
+
+  React.useEffect(() => {
+    if (isLoading) {
+      const timeout = setTimeout(() => {
+        setHasTimedOut(true);
+      }, 20000);
+
+      return () => clearTimeout(timeout);
+    } else {
+      setHasTimedOut(false);
+    }
+  }, [isLoading]);
   
-  if (isLoading) {
+  if (isLoading && !hasTimedOut) {
     return <LoadingSpinner />;
+  }
+
+  if (hasTimedOut) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white px-4">
+        <div className="text-center max-w-md">
+          <h2 className="text-2xl font-bold text-black mb-4">Problema ao carregar</h2>
+          <p className="text-gray-600 mb-6">
+            A aplicação está demorando mais que o esperado para carregar.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-black text-white px-6 py-3 rounded-lg font-semibold hover:bg-gray-800 transition-colors"
+          >
+            Recarregar Página
+          </button>
+        </div>
+      </div>
+    );
   }
   
   if (isAdmin()) {

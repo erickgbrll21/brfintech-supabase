@@ -38,3 +38,5 @@ Você deve ver as seguintes colunas:
 - sales (JSONB)
 
 
+
+

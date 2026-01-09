@@ -7,3 +7,5 @@ ADD COLUMN IF NOT EXISTS username TEXT UNIQUE;
 
 -- Criar índice para melhorar performance das queries por username
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+
+

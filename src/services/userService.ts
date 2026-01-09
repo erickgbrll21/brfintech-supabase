@@ -1,21 +1,27 @@
 import { User } from '../types';
 import { hashPassword, verifyPassword } from '../utils/encryption';
 import { supabase } from '../lib/supabase';
+import { safeSupabaseQuery } from '../utils/supabaseRequest';
 
 export const getUsers = async (): Promise<User[]> => {
   try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const data: any[] | null = await safeSupabaseQuery(
+      async () => {
+        const result = await supabase
+          .from('users')
+          .select('*')
+          .order('created_at', { ascending: false });
+        return result;
+      },
+      { timeout: 10000, maxRetries: 2 }
+    );
     
-    if (error) {
-      console.error('Erro ao buscar usuários do Supabase:', error);
+    if (!data || !Array.isArray(data)) {
       return [];
     }
     
     // Converter formato do banco para formato da aplicação
-    return (data || []).map((user: any) => ({
+    return data.map((user: any) => ({
       id: user.id,
       name: user.name,
       email: user.email,
@@ -97,19 +103,17 @@ export const getUserByEmail = async (email: string): Promise<User | null> => {
 
 export const getUserByUsername = async (username: string): Promise<User | null> => {
   try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('username', username)
-      .maybeSingle();
-    
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return null; // Nenhum resultado encontrado
-      }
-      console.error('Erro ao buscar usuário por username do Supabase:', error);
-      return null;
-    }
+    const data: any = await safeSupabaseQuery(
+      async () => {
+        const result = await supabase
+          .from('users')
+          .select('*')
+          .eq('username', username)
+          .maybeSingle();
+        return result;
+      },
+      { timeout: 8000, maxRetries: 2 }
+    );
     
     if (!data) return null;
     
@@ -399,13 +403,19 @@ export const verifyUserPassword = async (
   password: string
 ): Promise<boolean> => {
   try {
-    const { data, error } = await supabase
-      .from('user_passwords')
-      .select('password_hash')
-      .eq('user_id', userId)
-      .single();
+    const data: any = await safeSupabaseQuery(
+      async () => {
+        const result = await supabase
+          .from('user_passwords')
+          .select('password_hash')
+          .eq('user_id', userId)
+          .single();
+        return result;
+      },
+      { timeout: 5000, maxRetries: 2 }
+    );
     
-    if (error || !data) return false;
+    if (!data?.password_hash) return false;
     
     return verifyPassword(password, data.password_hash);
   } catch (error) {

@@ -3,6 +3,7 @@ import { User } from '../types';
 import { supabase, clearAllSupabaseSessions } from '../lib/supabase';
 import { getCustomers, verifyCustomerPassword } from '../services/customerService';
 import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
+import { safeGetSession, safeSupabaseQuery, safeSupabaseRequest } from '../utils/supabaseRequest';
 
 interface AuthContextType {
   user: User | null;
@@ -27,30 +28,32 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       // Buscar dados do usuário na tabela users usando o ID do Supabase Auth
       // Primeiro tentar por ID (que deve ser o UUID do Supabase Auth)
-      let { data: userData, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', supabaseUser.id)
-        .single();
+      let userData: any = await safeSupabaseQuery(
+        async () => {
+          const result = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', supabaseUser.id)
+            .single();
+          return result;
+        },
+        { timeout: 8000, maxRetries: 2 }
+      );
 
       // Se não encontrou por ID, tentar por email
-      if (error && error.code === 'PGRST116') {
+      if (!userData) {
         console.log('Usuário não encontrado por ID, tentando por email...');
-        const { data: userByEmail, error: emailError } = await supabase
-          .from('users')
-          .select('*')
-          .eq('email', supabaseUser.email || '')
-          .single();
-        
-        if (!emailError && userByEmail) {
-          userData = userByEmail;
-          error = null;
-        }
-      }
-
-      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-        console.error('Erro ao buscar dados do usuário:', error);
-        return null;
+        userData = await safeSupabaseQuery(
+          async () => {
+            const result = await supabase
+              .from('users')
+              .select('*')
+              .eq('email', supabaseUser.email || '')
+              .single();
+            return result;
+          },
+          { timeout: 8000, maxRetries: 2 }
+        );
       }
 
       // Se o usuário não existe na tabela users, criar
@@ -61,13 +64,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         
         // Se não tem role no metadata, tentar buscar de usuário existente por email
         if (role === 'user') {
-          const { data: existingUserByEmail } = await supabase
-            .from('users')
-            .select('role')
-            .eq('email', supabaseUser.email || '')
-            .single();
+          const existingUserByEmail: any = await safeSupabaseQuery(
+            async () => {
+              const result = await supabase
+                .from('users')
+                .select('role')
+                .eq('email', supabaseUser.email || '')
+                .single();
+              return result;
+            },
+            { timeout: 5000, maxRetries: 1 }
+          );
           
-          if (existingUserByEmail) {
+          if (existingUserByEmail?.role) {
             role = existingUserByEmail.role;
           }
         }
@@ -81,33 +90,42 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
 
         console.log('Inserindo novo usuário:', newUser);
-        const { data: createdUser, error: createError } = await supabase
-          .from('users')
-          .insert(newUser)
-          .select()
-          .single();
-
-        if (createError) {
-          console.error('Erro ao criar usuário na tabela:', createError);
-          // Se o erro for de duplicata, tentar buscar novamente
-          if (createError.code === '23505') { // Unique violation
-            const { data: retryUser } = await supabase
+        const createdUser: any = await safeSupabaseQuery(
+          async () => {
+            const result = await supabase
               .from('users')
-              .select('*')
-              .eq('email', supabaseUser.email || '')
+              .insert(newUser)
+              .select()
               .single();
-            
-            if (retryUser) {
-              return {
-                id: retryUser.id,
-                name: retryUser.name,
-                email: retryUser.email,
-                username: retryUser.username || undefined,
-                role: retryUser.role,
-                createdAt: retryUser.created_at || retryUser.createdAt || new Date().toISOString(),
-                customerId: retryUser.customer_id || retryUser.customerId,
-              };
-            }
+            return result;
+          },
+          { timeout: 8000, maxRetries: 2 }
+        );
+
+        if (!createdUser) {
+          // Se falhou ao criar, tentar buscar novamente (pode ter sido criado por outra requisição)
+          const retryUser: any = await safeSupabaseQuery(
+            async () => {
+              const result = await supabase
+                .from('users')
+                .select('*')
+                .eq('email', supabaseUser.email || '')
+                .single();
+              return result;
+            },
+            { timeout: 5000, maxRetries: 1 }
+          );
+          
+          if (retryUser) {
+            return {
+              id: retryUser.id,
+              name: retryUser.name,
+              email: retryUser.email,
+              username: retryUser.username || undefined,
+              role: retryUser.role,
+              createdAt: retryUser.created_at || retryUser.createdAt || new Date().toISOString(),
+              customerId: retryUser.customer_id || retryUser.customerId,
+            };
           }
           return null;
         }
@@ -145,23 +163,30 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // LIMPEZA INICIAL: Remover qualquer sessão antiga ao iniciar
     // Isso garante que não haja sessões "fantasma" de deploys anteriores
     const initializeAuth = async () => {
+      // Timeout máximo para garantir que isLoading sempre termine
+      const maxInitTimeout = setTimeout(() => {
+        console.warn('Timeout máximo na inicialização de autenticação. Finalizando...');
+        setIsLoading(false);
+      }, 15000); // 15 segundos máximo
+
       try {
         // Limpar todas as sessões antigas primeiro
         clearAllSupabaseSessions();
         
-        // Verificar se há sessão válida (sem persistência automática, sempre será null inicialmente)
-        const { data: sessionData, error } = await supabase.auth.getSession();
+        // Verificar se há sessão válida com timeout e retry
+        const sessionResult = await safeGetSession({ timeout: 5000, maxRetries: 2 });
         
         // Se houver erro ou sessão inválida, garantir limpeza completa
-        if (error || !sessionData?.session) {
+        if (sessionResult.error || !sessionResult.data?.session) {
           clearAllSupabaseSessions();
           setSupabaseSession(null);
           setUser(null);
+          clearTimeout(maxInitTimeout);
           setIsLoading(false);
           return;
         }
 
-        const session = sessionData.session;
+        const session = sessionResult.data.session;
         
         // Validar se a sessão ainda é válida
         if (session?.user && session.expires_at) {
@@ -171,14 +196,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           // Se a sessão expirou, limpar tudo
           if (expiresAt < now) {
             clearAllSupabaseSessions();
-            await supabase.auth.signOut();
+            // Não aguardar signOut para não bloquear
+            supabase.auth.signOut().catch(() => {});
             setSupabaseSession(null);
             setUser(null);
+            clearTimeout(maxInitTimeout);
             setIsLoading(false);
             return;
           }
           
-          // Sessão válida - sincronizar dados do usuário
+          // Sessão válida - sincronizar dados do usuário (não bloquear se falhar)
           setSupabaseSession(session);
           const userData = await syncUserData(session.user);
           setUser(userData);
@@ -195,6 +222,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setSupabaseSession(null);
         setUser(null);
       } finally {
+        clearTimeout(maxInitTimeout);
         setIsLoading(false);
       }
     };
@@ -224,7 +252,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           if (expiresAt < now) {
             // Sessão expirada - limpar tudo
             clearAllSupabaseSessions();
-            await supabase.auth.signOut();
+            // Não aguardar signOut para não bloquear
+            supabase.auth.signOut().catch(() => {});
             setSupabaseSession(null);
             setUser(null);
             setIsLoading(false);
@@ -233,15 +262,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         
         setSupabaseSession(session);
-        const userData = await syncUserData(session.user);
-        setUser(userData);
+        // Sincronizar dados do usuário sem bloquear
+        syncUserData(session.user)
+          .then(userData => setUser(userData))
+          .catch(error => {
+            console.error('Erro ao sincronizar dados do usuário no auth state change:', error);
+            setUser(null);
+          })
+          .finally(() => setIsLoading(false));
       } else {
         // Sem sessão - garantir estado limpo
         clearAllSupabaseSessions();
         setSupabaseSession(null);
         setUser(null);
+        setIsLoading(false);
       }
-      setIsLoading(false);
     });
 
     return () => {
@@ -256,6 +291,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const login = useCallback(async (emailOrUsername: string, password: string): Promise<boolean> => {
+    // Timeout máximo para login
+    const loginTimeout = setTimeout(() => {
+      console.warn('Timeout no login. Finalizando...');
+      setIsLoading(false);
+    }, 30000); // 30 segundos máximo
+
     try {
       setIsLoading(true);
       
@@ -267,37 +308,52 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       if (isEmail) {
         // Se for email, tentar login com Supabase Auth (para usuários administrativos)
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: emailOrUsername,
-          password: password,
-        });
+        // Usar timeout e retry
+        const authResult = await safeSupabaseRequest<{ user: any; session: any }>(
+          async () => {
+            const result = await supabase.auth.signInWithPassword({
+              email: emailOrUsername,
+              password: password,
+            });
+            return {
+              data: result.data?.user && result.data?.session 
+                ? { user: result.data.user, session: result.data.session }
+                : null,
+              error: result.error,
+            };
+          },
+          { timeout: 10000, maxRetries: 2 }
+        );
 
-        if (!authError && authData?.user && authData.session) {
+        if (!authResult.error && authResult.data?.user && authResult.data.session) {
           // Login bem-sucedido com Supabase Auth
           // Atualizar sessão manualmente
-          setSupabaseSession(authData.session);
+          setSupabaseSession(authResult.data.session);
           
-          // Sincronizar dados do usuário
-          const userData = await syncUserData(authData.user);
+          // Sincronizar dados do usuário (com timeout)
+          const userData = await syncUserData(authResult.data.user);
           if (userData) {
             setUser(userData);
-            setSupabaseSession(authData.session);
+            setSupabaseSession(authResult.data.session);
+            clearTimeout(loginTimeout);
             setIsLoading(false);
             return true;
           } else {
             // Falha ao sincronizar - limpar tudo
             clearAllSupabaseSessions();
-            await supabase.auth.signOut();
+            supabase.auth.signOut().catch(() => {});
             setUser(null);
             setSupabaseSession(null);
+            clearTimeout(loginTimeout);
             setIsLoading(false);
             return false;
           }
         }
 
         // Se deu erro no Supabase Auth, limpar e retornar false
-        if (authError) {
+        if (authResult.error) {
           clearAllSupabaseSessions();
+          clearTimeout(loginTimeout);
           setIsLoading(false);
           return false;
         }
@@ -321,12 +377,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       
       // Se não encontrou como usuário, tentar como cliente (customers)
-      const customers = await getCustomers();
-      const foundCustomer = customers.find(c => c.username === emailOrUsername);
+      // Usar timeout para getCustomers
+      const customers: any[] = await Promise.race([
+        getCustomers(),
+        new Promise<any[]>((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout ao buscar clientes')), 10000)
+        ),
+      ]).catch(() => []);
+      
+      const foundCustomer = customers.find((c: any) => c.username === emailOrUsername);
       
       if (foundCustomer) {
-        // Verificar senha do cliente usando hash
-        const isValidPassword = await verifyCustomerPassword(foundCustomer.id, password);
+        // Verificar senha do cliente usando hash (com timeout)
+        const isValidPassword = await Promise.race([
+          verifyCustomerPassword(foundCustomer.id, password),
+          new Promise<boolean>((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout ao verificar senha')), 5000)
+          ),
+        ]).catch(() => false);
         
         if (isValidPassword) {
           // Criar objeto User temporário para o cliente
@@ -341,9 +409,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           
           // Limpar qualquer sessão Supabase antes de definir cliente
           clearAllSupabaseSessions();
-          await supabase.auth.signOut();
+          supabase.auth.signOut().catch(() => {});
           setSupabaseSession(null);
           setUser(customerAsUser);
+          clearTimeout(loginTimeout);
           setIsLoading(false);
           return true;
         }
@@ -351,15 +420,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       // Login falhou - garantir estado limpo
       clearAllSupabaseSessions();
+      clearTimeout(loginTimeout);
       setIsLoading(false);
       return false;
     } catch (error) {
       console.error('Erro ao fazer login:', error);
       // Em caso de erro, garantir limpeza completa
       clearAllSupabaseSessions();
-      await supabase.auth.signOut();
+      supabase.auth.signOut().catch(() => {});
       setUser(null);
       setSupabaseSession(null);
+      clearTimeout(loginTimeout);
       setIsLoading(false);
       return false;
     }

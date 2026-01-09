@@ -1,6 +1,7 @@
 import { Customer, CieloTerminal } from '../types';
 import { hashPassword, verifyPassword } from '../utils/encryption';
 import { supabase } from '../lib/supabase';
+import { safeSupabaseQuery } from '../utils/supabaseRequest';
 
 // Função para migrar cliente antigo (com cieloTerminalId) para novo formato (com cieloTerminals)
 const migrateCustomer = (customer: Customer): Customer => {
@@ -57,29 +58,36 @@ const customerToDb = (customer: Customer) => {
 
 export const getCustomers = async (): Promise<Customer[]> => {
   try {
-    // Buscar clientes
-    const { data: customersData, error: customersError } = await supabase
-      .from('customers')
-      .select('*')
-      .order('created_at', { ascending: false });
+    // Buscar clientes com timeout e retry
+    const customersData: any[] | null = await safeSupabaseQuery(
+      async () => {
+        const result = await supabase
+          .from('customers')
+          .select('*')
+          .order('created_at', { ascending: false });
+        return result;
+      },
+      { timeout: 10000, maxRetries: 2 }
+    );
 
-    if (customersError) {
-      console.error('Erro ao buscar clientes do Supabase:', customersError);
+    if (!customersData || !Array.isArray(customersData)) {
       return [];
     }
 
-    // Buscar terminais
-    const { data: terminalsData, error: terminalsError } = await supabase
-      .from('cielo_terminals')
-      .select('*');
-
-    if (terminalsError) {
-      console.error('Erro ao buscar terminais do Supabase:', terminalsError);
-    }
+    // Buscar terminais com timeout e retry
+    const terminalsData: any[] | null = await safeSupabaseQuery(
+      async () => {
+        const result = await supabase
+          .from('cielo_terminals')
+          .select('*');
+        return result;
+      },
+      { timeout: 8000, maxRetries: 2 }
+    );
 
     // Agrupar terminais por cliente
     const terminalsByCustomer: { [key: string]: CieloTerminal[] } = {};
-    if (terminalsData) {
+    if (terminalsData && Array.isArray(terminalsData)) {
       terminalsData.forEach((term: any) => {
         if (!terminalsByCustomer[term.customer_id]) {
           terminalsByCustomer[term.customer_id] = [];
@@ -315,20 +323,19 @@ export const updateCustomer = async (
 // Função para obter hash da senha do cliente
 export const getCustomerPasswordHash = async (customerId: string): Promise<string | undefined> => {
   try {
-    const { data, error } = await supabase
-      .from('customer_passwords')
-      .select('password_hash')
-      .eq('customer_id', customerId)
-      .maybeSingle();
+    const data: any = await safeSupabaseQuery(
+      async () => {
+        const result = await supabase
+          .from('customer_passwords')
+          .select('password_hash')
+          .eq('customer_id', customerId)
+          .maybeSingle();
+        return result;
+      },
+      { timeout: 5000, maxRetries: 2 }
+    );
 
-    if (error) {
-      if (error.code !== 'PGRST116') {
-        console.error('Erro ao buscar hash da senha:', error);
-      }
-      return undefined;
-    }
-
-    if (!data) {
+    if (!data?.password_hash) {
       return undefined;
     }
 
@@ -345,7 +352,13 @@ export const verifyCustomerPassword = async (
   password: string
 ): Promise<boolean> => {
   try {
-    const hash = await getCustomerPasswordHash(customerId);
+    const hash = await Promise.race([
+      getCustomerPasswordHash(customerId),
+      new Promise<string | undefined>((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout')), 5000)
+      ),
+    ]).catch(() => undefined);
+    
     if (!hash) return false;
     return verifyPassword(password, hash);
   } catch (error) {
