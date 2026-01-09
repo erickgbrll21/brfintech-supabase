@@ -37,7 +37,7 @@ export default defineConfig({
     // Compressão de assets
     assetsInlineLimit: 4096,
   },
-  base: './',
+  base: '/',
   // Otimização de resolução de módulos
   resolve: {
     alias: {
