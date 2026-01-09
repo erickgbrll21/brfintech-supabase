@@ -3,7 +3,7 @@ import { User } from '../types';
 import { supabase, clearAllSupabaseSessions } from '../lib/supabase';
 import { getCustomers, verifyCustomerPassword } from '../services/customerService';
 import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
-import { safeGetSession, safeSupabaseQuery, safeSupabaseRequest } from '../utils/supabaseRequest';
+import { safeGetSession, safeSupabaseQuery } from '../utils/supabaseRequest';
 
 interface AuthContextType {
   user: User | null;
@@ -20,6 +20,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [, setSupabaseSession] = useState<Session | null>(null);
+  const isLoggingInRef = React.useRef(false);
 
   // Função para sincronizar dados do usuário do Supabase Auth com a tabela users
   const syncUserData = useCallback(async (supabaseUser: SupabaseUser): Promise<User | null> => {
@@ -233,12 +234,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event: string, session: Session | null) => {
+      // Ignorar eventos durante o processo de login manual
+      if (isLoggingInRef.current && event === 'SIGNED_IN') {
+        console.log('Login em progresso, ignorando evento SIGNED_IN do onAuthStateChange');
+        return;
+      }
+
       // SIGNED_OUT: garantir limpeza completa
       if (event === 'SIGNED_OUT' || !session) {
-        clearAllSupabaseSessions();
-        setSupabaseSession(null);
-        setUser(null);
-        setIsLoading(false);
+        if (!isLoggingInRef.current) {
+          clearAllSupabaseSessions();
+          setSupabaseSession(null);
+          setUser(null);
+          setIsLoading(false);
+        }
         return;
       }
 
@@ -251,31 +260,44 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           
           if (expiresAt < now) {
             // Sessão expirada - limpar tudo
-            clearAllSupabaseSessions();
-            // Não aguardar signOut para não bloquear
-            supabase.auth.signOut().catch(() => {});
-            setSupabaseSession(null);
-            setUser(null);
-            setIsLoading(false);
+            if (!isLoggingInRef.current) {
+              clearAllSupabaseSessions();
+              supabase.auth.signOut().catch(() => {});
+              setSupabaseSession(null);
+              setUser(null);
+              setIsLoading(false);
+            }
             return;
           }
         }
         
-        setSupabaseSession(session);
-        // Sincronizar dados do usuário sem bloquear
-        syncUserData(session.user)
-          .then(userData => setUser(userData))
-          .catch(error => {
-            console.error('Erro ao sincronizar dados do usuário no auth state change:', error);
-            setUser(null);
-          })
-          .finally(() => setIsLoading(false));
+        // Só atualizar se não estiver fazendo login manualmente
+        if (!isLoggingInRef.current) {
+          setSupabaseSession(session);
+          // Sincronizar dados do usuário sem bloquear
+          syncUserData(session.user)
+            .then(userData => {
+              if (userData) {
+                setUser(userData);
+              }
+            })
+            .catch(error => {
+              console.error('Erro ao sincronizar dados do usuário no auth state change:', error);
+            })
+            .finally(() => {
+              if (!isLoggingInRef.current) {
+                setIsLoading(false);
+              }
+            });
+        }
       } else {
-        // Sem sessão - garantir estado limpo
-        clearAllSupabaseSessions();
-        setSupabaseSession(null);
-        setUser(null);
-        setIsLoading(false);
+        // Sem sessão - garantir estado limpo (apenas se não estiver fazendo login)
+        if (!isLoggingInRef.current) {
+          clearAllSupabaseSessions();
+          setSupabaseSession(null);
+          setUser(null);
+          setIsLoading(false);
+        }
       }
     });
 
@@ -294,65 +316,72 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Timeout máximo para login
     const loginTimeout = setTimeout(() => {
       console.warn('Timeout no login. Finalizando...');
+      isLoggingInRef.current = false;
       setIsLoading(false);
     }, 30000); // 30 segundos máximo
 
     try {
       setIsLoading(true);
-      
-      // LIMPEZA PRÉ-LOGIN: Garantir que não há sessões antigas
-      clearAllSupabaseSessions();
+      isLoggingInRef.current = true; // Marcar que está fazendo login
       
       // Verificar se é um email válido
       const isEmail = isValidEmail(emailOrUsername);
       
       if (isEmail) {
         // Se for email, tentar login com Supabase Auth (para usuários administrativos)
-        // Usar timeout e retry
-        const authResult = await safeSupabaseRequest<{ user: any; session: any }>(
-          async () => {
-            const result = await supabase.auth.signInWithPassword({
-              email: emailOrUsername,
-              password: password,
-            });
-            return {
-              data: result.data?.user && result.data?.session 
-                ? { user: result.data.user, session: result.data.session }
-                : null,
-              error: result.error,
-            };
-          },
-          { timeout: 10000, maxRetries: 2 }
-        );
+        // NÃO usar safeSupabaseRequest aqui pois erros de autenticação são esperados
+        // e não devem fazer retry
+        try {
+          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email: emailOrUsername,
+            password: password,
+          });
 
-        if (!authResult.error && authResult.data?.user && authResult.data.session) {
-          // Login bem-sucedido com Supabase Auth
-          // Atualizar sessão manualmente
-          setSupabaseSession(authResult.data.session);
-          
-          // Sincronizar dados do usuário (com timeout)
-          const userData = await syncUserData(authResult.data.user);
-          if (userData) {
-            setUser(userData);
-            setSupabaseSession(authResult.data.session);
-            clearTimeout(loginTimeout);
-            setIsLoading(false);
-            return true;
-          } else {
-            // Falha ao sincronizar - limpar tudo
-            clearAllSupabaseSessions();
-            supabase.auth.signOut().catch(() => {});
-            setUser(null);
-            setSupabaseSession(null);
+          if (!authError && authData?.user && authData.session) {
+            // Login bem-sucedido com Supabase Auth
+            console.log('Login bem-sucedido, sincronizando dados do usuário...');
+            
+            // Atualizar sessão primeiro
+            setSupabaseSession(authData.session);
+            
+            // Sincronizar dados do usuário (com timeout, mas sem limpar sessão)
+            const userData = await syncUserData(authData.user);
+            if (userData) {
+              console.log('Usuário sincronizado com sucesso:', userData);
+              // Garantir que a sessão está definida primeiro
+              setSupabaseSession(authData.session);
+              // Depois definir o usuário
+              setUser(userData);
+              // Marcar que login foi concluído
+              isLoggingInRef.current = false;
+              clearTimeout(loginTimeout);
+              setIsLoading(false);
+              return true;
+            } else {
+              console.error('Falha ao sincronizar dados do usuário após login');
+              // Falha ao sincronizar - limpar tudo
+              isLoggingInRef.current = false;
+              clearAllSupabaseSessions();
+              await supabase.auth.signOut();
+              setUser(null);
+              setSupabaseSession(null);
+              clearTimeout(loginTimeout);
+              setIsLoading(false);
+              return false;
+            }
+          }
+
+          // Se deu erro no Supabase Auth, retornar false (credenciais inválidas)
+          if (authError) {
+            console.log('Erro de autenticação:', authError.message);
+            isLoggingInRef.current = false;
             clearTimeout(loginTimeout);
             setIsLoading(false);
             return false;
           }
-        }
-
-        // Se deu erro no Supabase Auth, limpar e retornar false
-        if (authResult.error) {
-          clearAllSupabaseSessions();
+        } catch (error) {
+          console.error('Erro ao fazer login com Supabase Auth:', error);
+          isLoggingInRef.current = false;
           clearTimeout(loginTimeout);
           setIsLoading(false);
           return false;
@@ -370,7 +399,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         
         if (isValidPassword) {
           // Usuário encontrado e senha válida - definir como usuário logado
+          // Limpar sessão Supabase pois é login via username (não Supabase Auth)
+          clearAllSupabaseSessions();
+          await supabase.auth.signOut();
+          setSupabaseSession(null);
           setUser(foundUser);
+          isLoggingInRef.current = false;
+          clearTimeout(loginTimeout);
           setIsLoading(false);
           return true;
         }
@@ -378,58 +413,60 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       // Se não encontrou como usuário, tentar como cliente (customers)
       // Usar timeout para getCustomers
-      const customers: any[] = await Promise.race([
-        getCustomers(),
-        new Promise<any[]>((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout ao buscar clientes')), 10000)
-        ),
-      ]).catch(() => []);
-      
-      const foundCustomer = customers.find((c: any) => c.username === emailOrUsername);
-      
-      if (foundCustomer) {
-        // Verificar senha do cliente usando hash (com timeout)
-        const isValidPassword = await Promise.race([
-          verifyCustomerPassword(foundCustomer.id, password),
-          new Promise<boolean>((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout ao verificar senha')), 5000)
+      try {
+        const customers: any[] = await Promise.race([
+          getCustomers(),
+          new Promise<any[]>((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout ao buscar clientes')), 10000)
           ),
-        ]).catch(() => false);
+        ]).catch(() => []);
         
-        if (isValidPassword) {
-          // Criar objeto User temporário para o cliente
-          const customerAsUser: User = {
-            id: `customer_${foundCustomer.id}`,
-            name: foundCustomer.name,
-            email: foundCustomer.email,
-            role: 'customer',
-            createdAt: foundCustomer.lastPurchase || new Date().toISOString(),
-            customerId: foundCustomer.id,
-          };
+        const foundCustomer = customers.find((c: any) => c.username === emailOrUsername);
+        
+        if (foundCustomer) {
+          // Verificar senha do cliente usando hash (com timeout)
+          const isValidPassword = await Promise.race([
+            verifyCustomerPassword(foundCustomer.id, password),
+            new Promise<boolean>((_, reject) => 
+              setTimeout(() => reject(new Error('Timeout ao verificar senha')), 5000)
+            ),
+          ]).catch(() => false);
           
-          // Limpar qualquer sessão Supabase antes de definir cliente
-          clearAllSupabaseSessions();
-          supabase.auth.signOut().catch(() => {});
-          setSupabaseSession(null);
-          setUser(customerAsUser);
-          clearTimeout(loginTimeout);
-          setIsLoading(false);
-          return true;
+          if (isValidPassword) {
+            // Criar objeto User temporário para o cliente
+            const customerAsUser: User = {
+              id: `customer_${foundCustomer.id}`,
+              name: foundCustomer.name,
+              email: foundCustomer.email,
+              role: 'customer',
+              createdAt: foundCustomer.lastPurchase || new Date().toISOString(),
+              customerId: foundCustomer.id,
+            };
+            
+            // Limpar qualquer sessão Supabase antes de definir cliente
+            clearAllSupabaseSessions();
+            await supabase.auth.signOut();
+            setSupabaseSession(null);
+            setUser(customerAsUser);
+            isLoggingInRef.current = false;
+            clearTimeout(loginTimeout);
+            setIsLoading(false);
+            return true;
+          }
         }
+      } catch (error) {
+        console.error('Erro ao buscar clientes durante login:', error);
       }
       
-      // Login falhou - garantir estado limpo
-      clearAllSupabaseSessions();
+      // Login falhou - não limpar sessões aqui pois pode haver uma sessão válida
+      isLoggingInRef.current = false;
       clearTimeout(loginTimeout);
       setIsLoading(false);
       return false;
     } catch (error) {
       console.error('Erro ao fazer login:', error);
-      // Em caso de erro, garantir limpeza completa
-      clearAllSupabaseSessions();
-      supabase.auth.signOut().catch(() => {});
-      setUser(null);
-      setSupabaseSession(null);
+      // Em caso de erro, limpar estado mas não forçar signOut se houver sessão válida
+      isLoggingInRef.current = false;
       clearTimeout(loginTimeout);
       setIsLoading(false);
       return false;
